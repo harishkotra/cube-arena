@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Rubik's cube arena UI server.
 
-Serves a single page with SIX sections, one per decision model, all running the
+Serves a single page with SEVEN sections, one per decision model, all running the
 same scrambled cube at the same time in the same view (three per row).
 
     python server.py            # http://127.0.0.1:8077
@@ -33,14 +33,14 @@ from urllib.parse import urlparse
 from arena import run as arena_run
 from charts import build_scorecard
 from cube import facelet_rows, scramble, solved_faces, solved_facelets
-from engines import ClefEngine, GlinerEngine, KevEngine, LayaEngine, StrandsEngine
+from engines import ClefEngine, GlinerEngine, KevEngine, LayaEngine, PhocinaeEngine, StrandsEngine
 
 ROOT = pathlib.Path(__file__).parent
 UI = ROOT / "ui" / "index.html"
 RESULTS = ROOT / "results"
 RESULTS.mkdir(exist_ok=True)
 
-# Order here is the order of the six sections in the UI.
+# Order here is the order of the seven sections in the UI.
 ENGINE_SPECS = [
     ("laya", "Laya 421M", "laya-mlx · MLX · local", lambda: LayaEngine()),
     ("strands", "Strands Decider 2B", "strands-decider · torch/MPS · local", lambda: StrandsEngine()),
@@ -48,11 +48,12 @@ ENGINE_SPECS = [
     ("clef-flash", "Clef-Flash 9B", "clef-flash · Workers AI · cloud", lambda: ClefEngine("clef-flash")),
     ("clef", "Clef 27B", "clef · Workers AI · cloud", lambda: ClefEngine("clef")),
     ("kev", "Kev-0.8B", "kev · local server :8008", lambda: KevEngine()),
+    ("phocinae", "Phocinae Largha 150M", "phocinae · local server :8155", lambda: PhocinaeEngine()),
 ]
 
 # Engines that emit generated text rather than a typed option distribution. The UI
 # flags these so their results are not read as like-for-like decision models.
-# Empty: all six registered engines are typed-decision models returning a
+# Empty: all seven registered engines are typed-decision models returning a
 # distribution over the 18 moves.
 GENERATIVE: set[str] = set()
 

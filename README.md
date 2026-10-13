@@ -1,8 +1,8 @@
 # Rubik's Cube Decision Arena
 
-Six decision models, one scrambled Rubik's cube, one screen. Each model is asked the same question every turn — *which single move reduces the number of misplaced stickers the most?* — and picks one move from the 18 legal moves. The UI shows all six running **side by side in the same view**, three per row, each with a real 3D cube updating live.
+Seven decision models, one scrambled Rubik's cube, one screen. Each model is asked the same question every turn — *which single move reduces the number of misplaced stickers the most?* — and picks one move from the 18 legal moves. The UI shows all seven running **side by side in the same view**, each with a real 3D cube updating live.
 
-All six are typed **decision models** ("system-one" models) sharing one contract. A model that cannot run says so plainly, with the reason, instead of pretending.
+All seven are typed **decision models** ("system-one" models) sharing one contract. A model that cannot run says so plainly, with the reason, instead of pretending.
 
 The point is not "who wins". A cube is a **planning** problem (system-two: lookahead, search). These are **system-one** models: fast, calibrated judgments about the current state. The arena measures exactly where that breaks down.
 
@@ -23,7 +23,7 @@ The point is not "who wins". A cube is a **planning** problem (system-two: looka
 
 ---
 
-## The six models
+## The seven models
 
 | # | Section | Model | Params | Where it runs | How it is called |
 |---|---|---|---|---|---|
@@ -34,7 +34,7 @@ The point is not "who wins". A cube is a **planning** problem (system-two: looka
 | 5 | `clef` | **Clef** (`Cloudflare/clef`) | 27B | Cloudflare Workers AI | HTTP `.../ai/run/@cf/cloudflare/clef` |
 | 6 | `kev` | **Kev-0.8B** (`jaredpalmer/kev-0.8b`) | 0.8B | local server `:8008` | HTTP `POST /v1/systemone` |
 
-All six share the same typed-decision contract: state plus a closed set of options in, a choice and a confidence out. That is what makes a fair side-by-side possible.
+All seven share the same typed-decision contract: state plus a closed set of options in, a choice and a confidence out. That is what makes a fair side-by-side possible.
 
 ### Why two of them run in the cloud
 
@@ -42,14 +42,14 @@ This was built on an **Apple M2 Mac mini with 8 GB RAM**. Clef (27B) does not fi
 
 ### Distributions differ, and the arena exposes it
 
-- **laya, strands, clef, clef-flash and kev return a full distribution** over the 18 moves, so the arena runs them as a *stochastic policy* (draw the move from the model's own distribution). Argmax collapses: models pick one move every turn.
+- **laya, strands, clef, clef-flash, kev and phocinae return a full distribution** over the 18 moves, so the arena runs them as a *stochastic policy* (draw the move from the model's own distribution). Argmax collapses: models pick one move every turn.
 - **GLiNER2.5-Decide returns only a single label** plus a confidence, so it is argmax-only. In practice it picks `U` on nearly every turn.
 
 ---
 
 ## Requirements
 
-- macOS on Apple silicon (developed on macOS 15.5, M-series). 16 GB RAM runs the three local models plus Kev-0.8B comfortably; the Clef panels only need a Cloudflare token.
+- macOS on Apple silicon (developed on macOS 15.5, M-series). 16 GB RAM runs the three local models plus Kev-0.8B and Phocinae-Largha comfortably; the Clef panels only need a Cloudflare token.
 - Python 3.12.
 - `uv` (used here) or plain `pip`.
 - ~9 GB free disk (torch, the Qwen3.5-2B base weights, and the local models).
@@ -121,6 +121,21 @@ uv run --extra serve python -m kev.serve --run jaredpalmer/kev-0.8b --port 8008
 
 On a 16 GB machine, **Kev-0.8B is the only size that fits**: the 4B and 9B checkpoints want ~32 GB for bf16, and `kev.serve` has no built-in quantization knob (the MLX path loads the stored bf16 weights). The arena labels the panel `Kev-0.8B` so the comparison stays honest. If the server is not running, the panel reads `unavailable: no server at 127.0.0.1:8008`.
 
+### 3c. Phocinae-Largha-150M-v1 (section 7, optional)
+
+Phocinae-Largha is a 144.3M bilingual decision model served by its own SystemOne-compatible server on `:8155`; it runs on CPU or CUDA, no GPU required:
+
+```bash
+# one-time
+git clone https://github.com/Phocinae/phocinae-server.git ~/experiments/phocinae-server
+cd ~/experiments/phocinae-server && pip install fastapi uvicorn torch
+# weights: https://huggingface.co/Phocinae/Phocinae-Largha-150M-v1 (point PHOC_MODEL_DIR at the weights checkout)
+# every run (or just ./run_phocinae.sh from the arena)
+PHOC_MODEL_DIR=/path/to/Phocinae-Largha-150M-v1 python -m phocinae.main
+```
+
+If the server is not running, the panel reads `unavailable: no server at 127.0.0.1:8155`.
+
 See `SETUP.md` for the full end-to-end install on a fresh machine.
 
 ### 4. Pre-download the local weights (optional, saves time later)
@@ -135,7 +150,7 @@ python -c "from gliner2 import AutoExtractor; AutoExtractor.from_pretrained('fas
 
 ---
 
-## Run the UI (the six-section view)
+## Run the UI (the seven-section view)
 
 ```bash
 cd ~/cube-arena && source .venv/bin/activate
@@ -149,7 +164,7 @@ Open **http://127.0.0.1:8077** in a browser.
 
 What you get:
 
-- **Six sections, one per model, three per row** — all six cubes fit in one frame, no scrolling. Each section shows:
+- **Seven sections, one per model** — every engine gets its own card. Each section shows:
   - the model name and where it runs,
   - a **real 3D cube** (CSS 3D transforms: all six faces positioned in 3D space with perspective, slowly rotating, colours updating after every move),
   - a progress bar for correct stickers (out of 54),
@@ -219,9 +234,10 @@ On startup the page shows `loading models…` per section while the models load 
               each turn: decide(state, question)
                               ▼
    ┌────────────────────────────────────────────────────────────────┐
-   │  engines.py — one contract, six adapters                        │
+   │  engines.py — one contract, seven adapters                      │
    │   laya      MLX, in-process          gliner   CPU, in-process   │
    │   strands   HTTP 127.0.0.1:8010      kev      HTTP 127.0.0.1:8008
+   │   phocinae  HTTP 127.0.0.1:8155                                 │
    │   clef / clef-flash   Cloudflare Workers AI (HTTPS)             │
    └────────────────────────────────────────────────────────────────┘
                               │
@@ -238,7 +254,7 @@ On startup the page shows `loading models…` per section while the models load 
 
 ## The one contract every model speaks
 
-Every engine — local or cloud — is a `choice` call over the same closed set of 18 moves. `engines.py` normalises all six behind a single method:
+Every engine — local or cloud — is a `choice` call over the same closed set of 18 moves. `engines.py` normalises all seven behind a single method:
 
 ```python
 # engines.py — the interface (one method) and the shape it returns
@@ -354,7 +370,7 @@ python render.py
 | File | What it is |
 |---|---|
 | `cube.py` | 3×3 cube simulation + metrics (correct stickers, complete faces, staged subgoals). Built on `pycuber`. |
-| `engines.py` | The six adapters behind one `decide(state, question)` interface, plus a reachability probe for the server-backed ones. |
+| `engines.py` | The seven adapters behind one `decide(state, question)` interface, plus a reachability probe for the server-backed ones. |
 | `solver.py` | Kociemba bridge: solution + first move. Holds the pycuber↔Kociemba facelet encoding. Degrades cleanly if kociemba is missing. |
 | `charts.py` | Four-panel dark scorecard (progress, latency, guided resolution, final score) rendered from a run JSON. Served at `/api/chart/<run_id>`. |
 | `SETUP.md` | Step-by-step install and run guide for a fresh machine, including keys. |
@@ -363,7 +379,7 @@ python render.py
 | `probe.py` | Measures whether model probabilities correlate with true move quality. |
 | `render.py` | Terminal summary table + progress chart. |
 | `server.py` | The UI server (stdlib only): `/`, `/api/engines`, `/api/run`, `/api/run/<id>`. |
-| `ui/index.html` | The six-section page. Single file, no build step. |
+| `ui/index.html` | The seven-section page. Single file, no build step. |
 | `check_run.py` | Poll a UI run from the terminal and print its final state. |
 | `REPORT.md` | The written findings and caveats. |
 | `BLOG.md` | The long-form technical write-up (architecture, code walkthrough, lessons). |
@@ -420,6 +436,7 @@ Read it honestly:
 | strands section shows `unavailable` | The strands-decider server is not running. Start it (Setup step 2) and reload. |
 | clef sections show `unavailable` | No `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_AUTH_TOKEN`. Add them (Setup step 3) and restart `server.py`. |
 | kev section shows `unavailable` | No server on `:8008`. Start it with `./run_kev.sh` (or Setup step 3b), or ignore it. |
+| phocinae section shows `unavailable` | No server on `:8155`. Start it with `./run_phocinae.sh` (or Setup step 3c), or ignore it. |
 | First `Start race` feels stuck | GLiNER2.5-Decide takes ~3–4 s per move; the whole race waits on the slowest model. Lower **moves** or run fewer models. |
 | `422 Unprocessable Entity` from strands | `choice.criteria` must be a **dict** `{option: description}`, not a list. `engines.py` already does this. |
 | `AttributeError: 'Cube' object has no attribute 'faces'` | pycuber uses `cube.get_face("U")`, not `cube.faces`. |
@@ -490,7 +507,7 @@ Then register it in `server.py`:
 
 ```python
 ENGINE_SPECS = [
-    # ...existing six...
+    # ...existing seven...
     ("my-model", "My Model 1B", "my-runtime · local", lambda: MyEngine()),
 ]
 ```

@@ -1,6 +1,6 @@
-"""One interface, six engines.
+"""One interface, seven engines.
 
-All six decision models speak the same contract:
+All seven decision models speak the same contract:
 
     {state, questions: {id: {type, instructions, criteria}}} -> answers[id]
 
@@ -9,6 +9,7 @@ All six decision models speak the same contract:
   * gliner2.5-decide : in-process classify_text(state, labels)     (local, CPU)
   * clef / clef-flash: POST Cloudflare Workers AI /ai/run/...      (cloud)
   * kev              : POST http://127.0.0.1:8008/v1/systemone    (local server)
+  * phocinae         : POST http://127.0.0.1:8155/v1/systemone    (local server)
 
 Each adapter returns a Decision: the chosen option, the confidence, the full
 probability distribution, and the wall-clock latency of the call.
@@ -307,3 +308,64 @@ class KevEngine(HttpEngine):
             headers={"Authorization": "Bearer local", "Content-Type": "application/json"},
             health_url=f"http://{host}:{port}/v1/models",
         )
+
+
+class PhocinaeEngine(HttpEngine):
+    """Phocinae-Largha-150M-v1: a small bilingual decision model with its own
+    SystemOne-compatible server.
+
+        PHOC_MODEL_DIR=/path/to/hf_repo python -m phocinae.main
+
+    The server binds 127.0.0.1:8155 by default, runs on CPU or CUDA, and needs
+    no auth unless PHOC_BEARER_TOKEN is set. Two shape differences from the
+    other engines are handled here: the request carries `questions` as a list
+    (`id` / `type` / `options`) rather than a dict, and a choice answer comes
+    back as the 0-based option index with per-option probabilities in the
+    `option_scores` extension, not as an option key inside `answers`. This
+    adapter translates both, so the arena still sees the usual key-based
+    contract; the question's `instructions` text has no counterpart in the
+    server request and is dropped. GET /health doubles as the probe.
+    """
+
+    def __init__(self, port: int = 8155, host: str = "127.0.0.1",
+                 model: str = "Phocinae-Largha-150M-v1", name: str = "phocinae",
+                 headers: dict[str, str] | None = None):
+        super().__init__(
+            name=name,
+            url=f"http://{host}:{port}/v1/systemone",
+            model=model,
+            headers=headers,
+            health_url=f"http://{host}:{port}/health",
+        )
+
+    def decide(self, state: str, question: dict[str, Any], qid: str = "move") -> Decision:
+        criteria = question.get("criteria") or {}
+        keys = list(criteria.keys())
+        if not keys:
+            return Decision(self.name, "", None,
+                            error="phocinae adapter expects a choice question with criteria")
+        body = {
+            "model": self.model,
+            "state": state,
+            "questions": [{"id": qid, "type": question.get("type", "choice"),
+                           "options": [str(v) for v in criteria.values()]}],
+        }
+        t0 = time.perf_counter()
+        try:
+            r = self.client.post(self.url, json=body)
+            r.raise_for_status()
+            resp = r.json()
+        except Exception as e:  # noqa: BLE001
+            return Decision(self.name, "", None, latency_ms=(time.perf_counter() - t0) * 1000,
+                            error=f"{type(e).__name__}: {e}")
+        dt = (time.perf_counter() - t0) * 1000
+        try:
+            idx = resp["answers"][qid]
+            if isinstance(idx, bool) or not isinstance(idx, int) or not 0 <= idx < len(keys):
+                raise ValueError(f"answer {idx!r} is not an option index")
+            scores = (resp.get("option_scores") or {}).get(qid) or []
+            probs = {k: float(s) for k, s in zip(keys, scores)}
+            conf = (resp.get("answer_confidence") or {}).get(qid)
+        except Exception as e:  # noqa: BLE001
+            return Decision(self.name, "", None, latency_ms=dt, error=f"parse: {e}")
+        return Decision(self.name, keys[idx], (float(conf) if conf is not None else None), probs, dt)
